@@ -27,7 +27,6 @@ clear
 readonly PROGNAME=$(basename $0)
 readonly ARGS="$@"
 readonly ARGSCOUNT="$#"
-readonly CONFIG_FILE='/etc/openvpn/client1/config.ovpn'
 readonly SERVER_LIST='/jffs/scripts/vpnserver.list'
 
 get_ip()
@@ -40,23 +39,22 @@ get_ip()
 change_vpn()
 {
   clear
-  printf "\n[ -- IPVANISH VPN RANDOMISER -- ]\n\n"
+  printf "\n\n[ -- IPVANISH VPN RANDOMISER -- ]\n\n"
   logger "Running IPVANISH VPN RANDOMISER..."
-  local vpn_current=$(grep 'ipvanish.com' $CONFIG_FILE)
-  local ip_current=$(get_ip)
-  printf "Current VPN config: %s\n" "$vpn_current"
-  printf "Current VPN IP address: %s\n" "$ip_current"
-
+  local vpn_old=$(nvram show \
+                      | grep vpn_client1_addr \
+                      | awk -F"=" '{print $2}') > /dev/null 2>&1
+  printf "Old VPN config: %s\n" "$vpn_old"
+  local ip_old=$(get_ip)
   local server_count=$(wc -l < $SERVER_LIST)
   local random_int=$(awk -v min=1 -v max=$server_count 'BEGIN{srand(); print int(min+rand()*(max-min+1))}')
   local server_selected=$(awk "NR == $random_int" $SERVER_LIST)
-  printf "\n"
-  printf "New VPN selected: %s\n" "$server_selected"
-  local vpn_new="remote $server_selected.ipvanish.com 443"
+  local vpn_new="$server_selected.ipvanish.com"
   printf "New VPN config: %s\n" "$vpn_new"
   printf "\n"
-  printf "Updating config file..."
-  sed -i "s/$vpn_current/$vpn_new/g" $CONFIG_FILE
+  printf "Setting nvram client vpn values..."
+  nvram set vpn_client1_desc=$vpn_new > /dev/null 2>&1
+  nvram set vpn_client1_addr=$vpn_new > /dev/null 2>&1  
   printf "DONE\n"
   
   printf "Stopping OPENVPN service..."
@@ -69,12 +67,37 @@ change_vpn()
   read -t 10
   printf "DONE\n\n"
   
-  local ip_new=$(get_ip)
-  printf "New VPN IP address: %s\n" $ip_new
-  logger "Old VPN server was $vpn_current"
+  logger "Old VPN server was $vpn_old"
   logger "New VPN server set to $vpn_new"
-  printf "\n"
+  local ip_new=$(get_ip)
+  vpn_message="Old VPN:
+$vpn_old
+$ip_old
+
+New VPN:
+$vpn_new
+$ip_new
+"
+push_over "$vpn_message"
+printf "$vpn_message\n"
 }
+
+push_over()
+{
+  message=$1
+  printf "Sending Pushover Message..."
+  local title="EBDBVPN Change"
+  local message=$(printf "%s" "$message")
+
+  curl -s \
+    --form-string "token=APP_TOKEN_HERE" \
+    --form-string "user=USER_TOKEN_HERE" \
+    --form-string "title=$title" \
+    --form-string "message=$message" \
+    https://api.pushover.net/1/messages.json > /dev/null 2>&1
+  printf "DONE\n\n" 
+}
+
 
 main()
 {
